@@ -1,0 +1,18 @@
+/.idea/
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 忽略编译后的二进制文件 (假设你的项目名叫 distributed-kv)
+distributed-kv
+distributed-kv.exe
+
+# 忽略 data 目录
+/data/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
