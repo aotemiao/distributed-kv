@@ -14,9 +14,10 @@ import (
 
 // NodeConfig
 type NodeConfig struct {
-	NodeID   string
-	RaftAddr string
-	RaftDir  string
+	NodeID          string
+	RaftAddr        string
+	RaftDir         string
+	ShouldBootstrap bool // 是否应该执行集群引导
 }
 
 // RaftPeer 结构用于集群引导
@@ -70,15 +71,14 @@ func NewNode(cfg NodeConfig, peers []RaftPeer) (*Node, error) {
 		return nil, err
 	}
 	isNewCluster := !hasState
-	// ======================= 核心改动结束 =======================
 
 	raftNode, err := raft.NewRaft(raftConfig, fsm, logStore, stableStore, snapshotStore, transport)
 	if err != nil {
 		return nil, err
 	}
 
-	// 如果判断是新集群，才执行引导操作
-	if isNewCluster {
+	// 只有在 ShouldBootstrap 为 true 且是新集群时才执行引导操作
+	if isNewCluster && cfg.ShouldBootstrap {
 		fmt.Printf("检测到是全新节点，正在根据配置进行引导，伙伴节点列表: %+v\n", peers)
 		var raftServers []raft.Server
 		for _, peer := range peers {
@@ -92,6 +92,8 @@ func NewNode(cfg NodeConfig, peers []RaftPeer) (*Node, error) {
 		if err := f.Error(); err != nil {
 			return nil, fmt.Errorf("引导节点失败: %w", err)
 		}
+	} else if isNewCluster && !cfg.ShouldBootstrap {
+		fmt.Println("新节点将等待被现有集群添加...")
 	}
 
 	return &Node{Raft: raftNode, FSM: fsm}, nil
