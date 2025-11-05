@@ -35,8 +35,15 @@ func (c *ConsulClient) Client() *api.Client {
 
 // RegisterService 向 Consul 注册服务
 func (c *ConsulClient) RegisterService(id, httpAddr, raftAddr string) error {
-	host, portStr, _ := net.SplitHostPort(httpAddr)
-	port, _ := strconv.Atoi(portStr)
+	host, portStr, err := net.SplitHostPort(httpAddr)
+	if err != nil {
+		return fmt.Errorf("failed to parse httpAddr %q: %w", httpAddr, err)
+	}
+
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return fmt.Errorf("failed to parse port from httpAddr %q: %w", httpAddr, err)
+	}
 
 	reg := &api.AgentServiceRegistration{
 		ID:      id,
