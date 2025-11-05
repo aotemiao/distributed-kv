@@ -7,6 +7,7 @@ import (
 	"distributed-kv/internal/transport"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net"
@@ -234,13 +235,23 @@ func main() {
 						log.Printf("Failed to send join request to %s: %s", peerHTTPAddr, err)
 						continue
 					}
-					defer resp.Body.Close()
 
-					if resp.StatusCode == http.StatusOK {
-						log.Printf("Successfully joined cluster via %s", peerHTTPAddr)
+					joined := false
+					func() {
+						defer resp.Body.Close()
+						io.Copy(io.Discard, resp.Body)
+
+						if resp.StatusCode == http.StatusOK {
+							log.Printf("Successfully joined cluster via %s", peerHTTPAddr)
+							joined = true
+							return
+						}
+						log.Printf("Join request to %s returned status %d", peerHTTPAddr, resp.StatusCode)
+					}()
+
+					if joined {
 						return // 成功加入，退出 goroutine
 					}
-					log.Printf("Join request to %s returned status %d", peerHTTPAddr, resp.StatusCode)
 				}
 			}
 		}()
