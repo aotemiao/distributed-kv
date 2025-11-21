@@ -107,7 +107,7 @@ func (s *Server) joinHandler(w http.ResponseWriter, r *http.Request) {
 // kvHandler 检查 Leader 身份，并进行路由
 func (s *Server) kvHandler(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// defer s.mu.RUnlock() // 手动管理锁释放，以便在代理请求时释放锁
 
 	// 在 Raft 节点被注入之前，服务是不可用的
 	if s.raftNode == nil {
@@ -115,32 +115,46 @@ func (s *Server) kvHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if s.raftNode.State() != raft.Leader {
+	// 如果是写操作（POST/DELETE），必须由 Leader 处理
+	if r.Method != http.MethodGet && s.raftNode.State() != raft.Leader {
 		s.proxyToLeader(w, r)
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
+		// handleGet 内部会访问 FSM，FSM 有自己的锁，所以这里可以释放 Server 的锁
+		// 但为了保持一致性，我们让 handleGet 自己处理锁，或者在这里释放
+		// 考虑到 handleGet 只读 FSM，而 FSM 是线程安全的，我们可以释放 Server 锁
+		s.mu.RUnlock()
 		s.handleGet(w, r)
 	case http.MethodPost:
+		// handleSet 需要提交 Raft 日志，Raft 内部是线程安全的
+		s.mu.RUnlock()
 		s.handleSet(w, r)
 	case http.MethodDelete:
+		s.mu.RUnlock()
 		s.handleDelete(w, r)
 	default:
+		s.mu.RUnlock()
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
 // proxyToLeader 通过 Consul 发现 Leader 并代理请求
 func (s *Server) proxyToLeader(w http.ResponseWriter, r *http.Request) {
-	// RLock 在上层 kvHandler 中已被获取
+	// 1. 获取 Leader 地址（需要读锁）
+	// 注意：我们在获取到地址后立即释放锁，避免在网络请求期间持有锁
 	leaderRaftAddr := string(s.raftNode.Leader())
+	// 释放上层 kvHandler 获取的锁
+	s.mu.RUnlock()
+
 	if leaderRaftAddr == "" {
 		http.Error(w, "no leader elected", http.StatusServiceUnavailable)
 		return
 	}
 
+	// 2. 通过 Consul 查询 Leader 的 HTTP 地址
 	services, _, err := s.consul.Client().Health().Service(discovery.ServiceName, "", true, nil)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to query consul for services: %s", err), http.StatusInternalServerError)
@@ -160,6 +174,7 @@ func (s *Server) proxyToLeader(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 3. 构造并发送代理请求
 	targetURL := fmt.Sprintf("http://%s%s", leaderHTTPAddr, r.RequestURI)
 	log.Printf("Proxying request to leader at %s", targetURL)
 

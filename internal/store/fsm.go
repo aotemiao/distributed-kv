@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"sync"
@@ -33,7 +34,8 @@ func NewFSM() *FSM {
 func (f *FSM) Apply(logEntry *raft.Log) interface{} {
 	var cmd Command
 	if err := json.Unmarshal(logEntry.Data, &cmd); err != nil {
-		panic("Failed to unmarshal command: " + err.Error())
+		log.Printf("Failed to unmarshal command: %s", err)
+		return err
 	}
 
 	f.mu.Lock()
@@ -47,7 +49,8 @@ func (f *FSM) Apply(logEntry *raft.Log) interface{} {
 		delete(f.data, cmd.Key)
 		log.Printf("Applied DELETE command for key '%s'", cmd.Key)
 	default:
-		panic("Unrecognized command op: " + cmd.Op)
+		log.Printf("Unrecognized command op: %s", cmd.Op)
+		return fmt.Errorf("unrecognized command op: %s", cmd.Op)
 	}
 
 	return nil
